@@ -1,0 +1,31 @@
+# Release output and local diagnostics
+/dist/
+/live_smoke.py
+/validation-v*.json
+
+# Local credentials, runtime configuration and receipts
+/.codex/
+.env
+.env.*
+*.key
+auth.json
+config.toml
+settings.json
+install.json
+activation.json
+windows-task.xml
+requests*.jsonl
+*.log
+
+# Build and temporary files
+/codex-router
+/codex-router.exe
+*.test
+*.test.exe
+coverage.out
+*.tmp
+*.tmp-*
+__pycache__/
+*.pyc
+.DS_Store
+Thumbs.db
