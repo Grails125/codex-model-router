@@ -30,6 +30,7 @@ type RuntimeOptions struct {
 }
 
 type AuditRecord struct {
+	upstreamDiagnostics
 	Time     string `json:"time"`
 	Model    string `json:"model"`
 	Upstream string `json:"upstream"`
@@ -77,10 +78,19 @@ func NewRouter(options RuntimeOptions, key func() (string, error), audit func(Au
 	transport.Proxy = http.ProxyFromEnvironment
 	transport.ResponseHeaderTimeout = 300 * time.Second
 	transport.IdleConnTimeout = 90 * time.Second
+	transport.MaxIdleConnsPerHost = 16
+	transport.OnProxyConnectResponse = func(ctx context.Context, _ *url.URL, _ *http.Request, response *http.Response) error {
+		if state, ok := ctx.Value(upstreamTraceKey{}).(*upstreamTrace); ok {
+			state.mu.Lock()
+			state.stage, state.proxyStatus = "proxy_connect", response.StatusCode
+			state.mu.Unlock()
+		}
+		return nil
+	}
 	return &Router{
 		Options: normalizedRuntime(options), Registry: registry, DeepSeek: deepSeek,
 		DeepSeekKey: key, Audit: audit,
-		Client: &http.Client{Transport: transport},
+		Client: &http.Client{Transport: transport, CheckRedirect: func(*http.Request, []*http.Request) error { return http.ErrUseLastResponse }},
 	}, nil
 }
 
@@ -310,10 +320,15 @@ func (router *Router) responses(w http.ResponseWriter, r *http.Request) {
 		return
 	}
 	request.Header = headers
-	response, err := router.Client.Do(request)
+	started := time.Now()
+	response, diagnostic, err := router.doUpstream(request)
 	if err != nil {
-		writeError(w, http.StatusBadGateway, "Upstream connection failed")
-		router.audit(model, provider, 502, payload)
+		status := http.StatusBadGateway
+		if r.Context().Err() != nil {
+			status = 499
+		}
+		writeError(w, status, safeUpstreamError(diagnostic))
+		router.audit(model, provider, status, payload, diagnostic)
 		return
 	}
 	defer response.Body.Close()
@@ -331,7 +346,9 @@ func (router *Router) responses(w http.ResponseWriter, r *http.Request) {
 		count, readErr := response.Body.Read(buffer)
 		if count > 0 {
 			if _, err := w.Write(buffer[:count]); err != nil {
-				router.audit(model, provider, 499, payload)
+				diagnostic.Stage, diagnostic.ErrorClass = "client_write", "client_disconnected"
+				diagnostic.ElapsedMS = time.Since(started).Milliseconds()
+				router.audit(model, provider, 499, payload, diagnostic)
 				return
 			}
 			if flusher != nil {
@@ -342,11 +359,23 @@ func (router *Router) responses(w http.ResponseWriter, r *http.Request) {
 			break
 		}
 		if readErr != nil {
-			router.audit(model, provider, 502, payload)
-			return
+			diagnostic.Stage = "response_body"
+			diagnostic.ErrorClass, diagnostic.Errno, _ = classifyTransportError(readErr, diagnostic.Stage, 0)
+			diagnostic.ElapsedMS = time.Since(started).Milliseconds()
+			status := http.StatusBadGateway
+			if r.Context().Err() != nil {
+				status = 499
+				diagnostic.ErrorClass = "cancelled"
+			}
+			router.audit(model, provider, status, payload, diagnostic)
+			// Headers may already advertise success. Abort the HTTP stream so
+			// a truncated upstream response cannot become a clean downstream EOF.
+			panic(http.ErrAbortHandler)
 		}
 	}
-	router.audit(model, provider, response.StatusCode, payload)
+	diagnostic.Stage = "completed"
+	diagnostic.ElapsedMS = time.Since(started).Milliseconds()
+	router.audit(model, provider, response.StatusCode, payload, diagnostic)
 }
 
 var errTooLarge = errors.New("request is too large")
@@ -418,13 +447,18 @@ func removeForeignReasoning(payload map[string]any) {
 	payload["input"] = filtered
 }
 
-func (router *Router) audit(model, upstream string, status int, payload map[string]any) {
+func (router *Router) audit(model, upstream string, status int, payload map[string]any, diagnostics ...upstreamDiagnostics) {
 	if router.Audit == nil {
 		return
 	}
 	stream, _ := payload["stream"].(bool)
+	var diagnostic upstreamDiagnostics
+	if len(diagnostics) != 0 {
+		diagnostic = diagnostics[0]
+	}
 	router.Audit(AuditRecord{
-		Time: time.Now().UTC().Format(time.RFC3339Nano), Model: model,
+		upstreamDiagnostics: diagnostic,
+		Time:                time.Now().UTC().Format(time.RFC3339Nano), Model: model,
 		Upstream: upstream, Status: status, Stream: stream,
 	})
 }

@@ -2,7 +2,7 @@
 
 让同一个 Codex 桌面客户端的原生模型菜单同时显示 OpenAI 和 DeepSeek。选择模型后，本地路由会把 Responses 请求转发到对应渠道，支持流式输出和工具调用。
 
-这是独立社区项目，与 OpenAI、DeepSeek 官方无隶属关系。当前版本为 **1.0.1**。
+这是独立社区项目，与 OpenAI、DeepSeek 官方无隶属关系。当前版本为 **1.0.2**。
 
 ## 下载安装
 
@@ -10,10 +10,10 @@
 
 | 平台 | 下载 | 解压后的安装入口 |
 | --- | --- | --- |
-| Windows x64 / Arm64 | [Windows 安装包](https://github.com/Grails125/codex-model-router/releases/download/v1.0.1/CodexModelRouter-v1.0.1.zip) | 双击 `install-windows.cmd` |
-| macOS Apple Silicon / Intel | [macOS 安装包](https://github.com/Grails125/codex-model-router/releases/download/v1.0.1/CodexModelRouter-v1.0.1-macOS.tar.gz) | 双击 `Install-Codex-Model-Router.command` |
+| Windows x64 / Arm64 | [Windows 安装包](https://github.com/Grails125/codex-model-router/releases/download/v1.0.2/CodexModelRouter-v1.0.2.zip) | 双击 `install-windows.cmd` |
+| macOS Apple Silicon / Intel | [macOS 安装包](https://github.com/Grails125/codex-model-router/releases/download/v1.0.2/CodexModelRouter-v1.0.2-macOS.tar.gz) | 双击 `Install-Codex-Model-Router.command` |
 
-[全部发布文件和 SHA-256 校验文件](https://github.com/Grails125/codex-model-router/releases/tag/v1.0.1)
+[全部发布文件和 SHA-256 校验文件](https://github.com/Grails125/codex-model-router/releases/tag/v1.0.2)
 
 必须先完整解压，再运行安装入口。安装包自带对应架构的程序，使用时不需要 Python、Node、WSL 或 Homebrew。
 
@@ -83,7 +83,7 @@ Codex 原生模型菜单
 
 Windows 使用当前用户的计划任务 `Codex Model Router`，macOS 使用当前用户的 LaunchAgent `io.openai.codex-model-router`，在登录后启动后台路由。
 
-DeepSeek 密钥保存在本机 `deepseek.key` 中，不会打印到安装输出。审计日志只记录时间、模型、渠道、HTTP 状态和流式标志。不要分享个人 `config.toml`、`auth.json`、`settings.json`、`deepseek.key`、安装收据或未经检查的日志。
+DeepSeek 密钥保存在本机 `deepseek.key` 中，不会打印到安装输出。审计日志记录时间、模型、渠道、HTTP 状态、流式标志及连接诊断字段：失败阶段、固定错误分类、数字错误码、耗时、尝试次数、连接复用和代理使用情况。不记录原始异常文本、请求头、密钥或对话内容。不要分享个人 `config.toml`、`auth.json`、`settings.json`、`deepseek.key`、安装收据或未经检查的日志。
 
 ## 诊断与卸载
 
@@ -97,6 +97,10 @@ DeepSeek 密钥保存在本机 `deepseek.key` 中，不会打印到安装输出�
 卸载会保留后来修改的无关配置，同时保留本机备份和程序以便恢复。带时间戳的配置备份位于 `~/.codex/codex-model-router/backups/`。
 
 模型菜单没有更新时，先运行诊断命令，再完全重启 Codex 并新建聊天。若请求出现 502，需继续检查本机网络、代理和上游连接；本地服务健康通过并不代表每次上游请求都会成功。
+
+1.0.2 会复用上游 TCP/TLS 连接，并仅在确认 Responses 请求尚未发送的暂时建连故障后重试一次。请求可能已发送、收到上游 HTTP 错误、用户取消或响应流中断时，不自动重放请求。流中断会中止下游连接，避免正常 EOF 掩盖失败。
+
+`requests.jsonl` 的 `stage` 可区分 `dns`、`connect`、`proxy_connect`、`tls`、`send`、`response_headers` 和 `response_body`；`error_class` 提供固定错误分类。`retry_stage` 和 `retry_error_class` 表示发生过安全重试。`proxy_used=false` 表示未使用显式 HTTP 代理，系统 TUN 仍可能处理该连接。此版本不会自动更改系统代理或切换上游渠道。
 
 ## 从旧版升级
 
@@ -116,7 +120,7 @@ DeepSeek 密钥保存在本机 `deepseek.key` 中，不会打印到安装输出�
 | Windows x64 | 已实际验证安装、现有任务升级、健康检查、客户端模型列表和真实模型请求 |
 | Windows Arm64 | 已构建，未在 Arm64 设备运行验证 |
 | macOS Apple Silicon / Intel | 已构建并检查包内执行权限、脚本和 LaunchAgent XML；未在真实 Mac 上验证安装或运行 |
-| Go 测试与静态检查 | 20 项测试和 `go vet` 通过 |
+| Go 测试与静态检查 | 28 项测试和 `go vet` 通过 |
 
 双平台构建成功不等于双平台实机验收。macOS 安装包以未签名、未公证的形式提供。
 
@@ -138,7 +142,7 @@ go build -trimpath -o codex-router .
 Windows 上构建全部四种架构及发布安装包：
 
 ```powershell
-powershell.exe -NoProfile -ExecutionPolicy Bypass -File .\build.ps1 -Version 1.0.1
+powershell.exe -NoProfile -ExecutionPolicy Bypass -File .\build.ps1 -Version 1.0.2
 ```
 
 完整打包还需要 Python，仅用于生成保留 macOS 执行权限的 tar.gz，不是安装后的运行依赖。输出位于 `dist/`，包括 ZIP、macOS tar.gz 和各自的 SHA-256 校验文件。`deepseek_models.json` 保存 DeepSeek 模型定义，`models.go` 将其嵌入程序；远程 OpenAI 模型目录由路由按客户端版本和账户身份获取。
