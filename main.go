@@ -21,7 +21,7 @@ import (
 )
 
 const (
-	Version      = "1.0.2"
+	Version      = "1.0.3"
 	defaultPort  = 49627
 	serviceLabel = "io.openai.codex-model-router"
 )
@@ -43,6 +43,8 @@ func main() {
 		err = commandStatus(os.Args[2:])
 	case "doctor":
 		err = commandDoctor(os.Args[2:])
+	case "set-key":
+		err = commandSetKey(os.Args[2:])
 	case "version":
 		fmt.Printf("Codex Model Router %s (%s/%s)\n", Version, runtime.GOOS, runtime.GOARCH)
 	case "help", "--help", "-h":
@@ -65,6 +67,7 @@ Commands:
   serve      Run the loopback router in the foreground
   status     Check the router and report safe configuration state
   doctor     Validate runtime, credentials, config and service health
+  set-key    Replace the DeepSeek key from --stdin or DEEPSEEK_API_KEY
   version    Print the binary version and platform
 
 Install options:
@@ -76,6 +79,7 @@ Install options:
 
 Set DEEPSEEK_API_KEY in the environment for first-time installation. The
 installer writes it to a user-only key file, not to config.toml or its output.
+Use the change-deepseek-key scripts for hidden input when changing a key.
 `)
 }
 
@@ -271,8 +275,12 @@ func commandInstall(args []string) (installErr error) {
 	installedBinary := filepath.Join(*dataDir, binaryName)
 	// Snapshot before any writes so a failed upgrade cannot rotate the key or
 	// receipt beneath a still-running installation.
-	rollbackFiles, err := snapshotFiles(configPath, filepath.Join(*dataDir, "settings.json"),
-		filepath.Join(*dataDir, "install.json"), filepath.Join(*dataDir, "deepseek.key"), installedBinary)
+	snapshotPaths := []string{configPath, filepath.Join(*dataDir, "settings.json"),
+		filepath.Join(*dataDir, "install.json"), filepath.Join(*dataDir, "deepseek.key"), installedBinary}
+	if runtime.GOOS == "windows" {
+		snapshotPaths = append(snapshotPaths, windowsConsoleBinaryPath(installedBinary), filepath.Join(*dataDir, "windows-task.xml"))
+	}
+	rollbackFiles, err := snapshotFiles(snapshotPaths...)
 	if err != nil {
 		return err
 	}
@@ -286,9 +294,12 @@ func commandInstall(args []string) (installErr error) {
 		}
 		if restoreErr := restoreSnapshots(rollbackFiles); restoreErr != nil {
 			installErr = fmt.Errorf("%w; rollback failed: %v", installErr, restoreErr)
+			return
 		}
 		if serviceStopped && previous != nil && existingErr == nil {
-			_ = installService(installedBinary, *dataDir)
+			if restartErr := installService(installedBinary, *dataDir); restartErr != nil {
+				installErr = fmt.Errorf("%w; restart previous service failed: %v", installErr, restartErr)
+			}
 		}
 	}()
 	backupDir := filepath.Join(*dataDir, "backups")
@@ -340,6 +351,9 @@ func commandInstall(args []string) (installErr error) {
 			return err
 		}
 	}
+	if err := installBackgroundBinary(executable, installedBinary, *noService); err != nil {
+		return fmt.Errorf("install background executable: %w", err)
+	}
 	if err := atomicWrite(configPath, activated, 0o600); err != nil {
 		return err
 	}
@@ -373,19 +387,17 @@ func commandServe(args []string) error {
 	if *dataDir == "" {
 		*dataDir = filepath.Join(*codexHome, "codex-model-router")
 	}
+	if err := configureBackgroundLogging(*dataDir); err != nil {
+		return err
+	}
 	options, err := readSettings(*dataDir)
 	if err != nil {
 		return fmt.Errorf("read router settings: %w", err)
 	}
 	options.Version = Version // Report the running executable, not stale installer metadata.
-	keyPath := filepath.Join(*dataDir, "deepseek.key")
 	audit := newAuditLogger(filepath.Join(*dataDir, "requests.jsonl"))
 	router, err := NewRouter(options, func() (string, error) {
-		raw, err := os.ReadFile(keyPath)
-		if err != nil {
-			return "", err
-		}
-		return strings.TrimSpace(string(raw)), nil
+		return readDeepSeekKey(*dataDir)
 	}, audit.Write)
 	if err != nil {
 		return err
@@ -540,16 +552,27 @@ func restoreSnapshots(snapshots []fileSnapshot) error {
 			}
 			err = retryAtomicWrite(item.path, item.data, item.mode)
 		} else {
-			err = os.Remove(item.path)
-			if errors.Is(err, os.ErrNotExist) {
-				err = nil
-			}
+			err = retryRemove(item.path)
 		}
 		if err != nil {
 			result = errors.Join(result, fmt.Errorf("restore %s: %w", filepath.Base(item.path), err))
 		}
 	}
 	return result
+}
+
+func retryRemove(path string) error {
+	deadline := time.Now().Add(5 * time.Second)
+	for {
+		err := os.Remove(path)
+		if err == nil || errors.Is(err, os.ErrNotExist) {
+			return nil
+		}
+		if time.Now().After(deadline) {
+			return err
+		}
+		time.Sleep(100 * time.Millisecond)
+	}
 }
 
 func replaceBinary(path string, raw []byte) error {

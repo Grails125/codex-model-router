@@ -1,6 +1,8 @@
 package main
 
 import (
+	"bytes"
+	"debug/pe"
 	"encoding/binary"
 	"encoding/xml"
 	"errors"
@@ -13,6 +15,111 @@ import (
 	"strings"
 	"unicode/utf16"
 )
+
+func windowsConsoleBinaryPath(binaryPath string) string {
+	return strings.TrimSuffix(binaryPath, ".exe") + "-cli.exe"
+}
+
+// Keep the task's existing executable path so an upgrade never needs permission
+// to rewrite its registration. Its installed image uses the GUI subsystem;
+// the sibling console copy supports diagnostics and interactive key changes.
+func installBackgroundBinary(sourceExecutable, installedBinary string, noService bool) error {
+	if runtime.GOOS != "windows" || noService {
+		return nil
+	}
+	raw, err := os.ReadFile(sourceExecutable)
+	if err != nil {
+		return err
+	}
+	background, err := windowsGUIBinary(raw)
+	if err != nil {
+		return err
+	}
+	console, err := windowsSubsystemBinary(raw, pe.IMAGE_SUBSYSTEM_WINDOWS_CUI)
+	if err != nil {
+		return err
+	}
+	if err := replaceBinaryIfChanged(windowsConsoleBinaryPath(installedBinary), console); err != nil {
+		return err
+	}
+	return replaceBinaryIfChanged(installedBinary, background)
+}
+
+func replaceBinaryIfChanged(path string, raw []byte) error {
+	if current, err := os.ReadFile(path); err == nil && bytes.Equal(current, raw) {
+		// The console companion can itself be running this reinstall command.
+		return nil
+	}
+	return replaceBinary(path, raw)
+}
+
+func windowsGUIBinary(raw []byte) ([]byte, error) {
+	return windowsSubsystemBinary(raw, pe.IMAGE_SUBSYSTEM_WINDOWS_GUI)
+}
+
+func windowsSubsystemBinary(raw []byte, subsystem uint16) ([]byte, error) {
+	if subsystem != pe.IMAGE_SUBSYSTEM_WINDOWS_GUI && subsystem != pe.IMAGE_SUBSYSTEM_WINDOWS_CUI {
+		return nil, errors.New("unsupported target Windows executable subsystem")
+	}
+	image, err := pe.NewFile(bytes.NewReader(raw))
+	if err != nil {
+		return nil, errors.New("router executable is not a valid Windows PE image")
+	}
+	defer image.Close()
+	if image.Machine != pe.IMAGE_FILE_MACHINE_AMD64 && image.Machine != pe.IMAGE_FILE_MACHINE_ARM64 {
+		return nil, errors.New("unsupported Windows router executable architecture")
+	}
+	header, ok := image.OptionalHeader.(*pe.OptionalHeader64)
+	if !ok || (header.Subsystem != pe.IMAGE_SUBSYSTEM_WINDOWS_CUI && header.Subsystem != pe.IMAGE_SUBSYSTEM_WINDOWS_GUI) {
+		return nil, errors.New("unsupported Windows router executable subsystem")
+	}
+	if len(raw) < 64 || string(raw[:2]) != "MZ" {
+		return nil, errors.New("router executable has no DOS header")
+	}
+	peOffset := uint64(binary.LittleEndian.Uint32(raw[0x3c:0x40]))
+	// Subsystem is 68 bytes into the PE32+ optional header, following the
+	// four-byte PE signature and 20-byte COFF header.
+	subsystemOffset := peOffset + 4 + 20 + 68
+	if subsystemOffset+2 > uint64(len(raw)) || peOffset+4 > uint64(len(raw)) ||
+		string(raw[peOffset:peOffset+4]) != "PE\x00\x00" {
+		return nil, errors.New("router executable has an invalid PE header offset")
+	}
+	result := bytes.Clone(raw)
+	binary.LittleEndian.PutUint16(result[subsystemOffset:subsystemOffset+2], subsystem)
+	return result, nil
+}
+
+func configureBackgroundLogging(dataDir string) error {
+	if runtime.GOOS != "windows" {
+		return nil
+	}
+	executable, err := os.Executable()
+	if err != nil {
+		return err
+	}
+	image, err := pe.Open(executable)
+	if err != nil {
+		return err
+	}
+	header, ok := image.OptionalHeader.(*pe.OptionalHeader64)
+	image.Close()
+	if !ok || header.Subsystem != pe.IMAGE_SUBSYSTEM_WINDOWS_GUI {
+		return nil
+	}
+	if err := ensureDir(dataDir); err != nil {
+		return err
+	}
+	logPath := filepath.Join(dataDir, "service.log")
+	if info, err := os.Stat(logPath); err == nil && info.Size() > 1<<20 {
+		_ = os.Rename(logPath, filepath.Join(dataDir, "service.previous.log"))
+	}
+	log, err := os.OpenFile(logPath, os.O_CREATE|os.O_APPEND|os.O_WRONLY, 0o600)
+	if err != nil {
+		return err
+	}
+	os.Stdout, os.Stderr = log, log
+	return nil
+}
 
 func windowsTaskXML(binaryPath, dataDir string) ([]byte, error) {
 	var escape = func(value string) string {
@@ -105,28 +212,7 @@ func macLaunchAgentPlist(binaryPath, dataDir string) []byte {
 func installService(binaryPath, dataDir string) error {
 	switch runtime.GOOS {
 	case "windows":
-		exists, matches, err := windowsTaskMatches(binaryPath, dataDir)
-		if err != nil {
-			return err
-		}
-		if exists {
-			if !matches {
-				return errors.New("existing Codex Model Router task belongs to another installation")
-			}
-			return run("schtasks.exe", "/Run", "/TN", "Codex Model Router")
-		}
-		taskXML, err := windowsTaskXML(binaryPath, dataDir)
-		if err != nil {
-			return err
-		}
-		taskPath := filepath.Join(dataDir, "windows-task.xml")
-		if err := atomicWrite(taskPath, encodeUTF16LE(taskXML), 0o600); err != nil {
-			return err
-		}
-		if err := run("schtasks.exe", "/Create", "/F", "/TN", "Codex Model Router", "/XML", taskPath); err != nil {
-			return err
-		}
-		return run("schtasks.exe", "/Run", "/TN", "Codex Model Router")
+		return installWindowsService(binaryPath, dataDir, windowsTaskMatches, run)
 	case "darwin":
 		_ = stopService()
 		home, err := os.UserHomeDir()
@@ -153,6 +239,32 @@ func installService(binaryPath, dataDir string) error {
 	default:
 		return fmt.Errorf("background service installation is not implemented for %s; use --no-service", runtime.GOOS)
 	}
+}
+
+func installWindowsService(binaryPath, dataDir string,
+	query func(string, string) (bool, bool, error), execute func(string, ...string) error) error {
+	exists, matches, err := query(binaryPath, dataDir)
+	if err != nil {
+		return err
+	}
+	if exists {
+		if !matches {
+			return errors.New("existing Codex Model Router task belongs to another installation")
+		}
+		return execute("schtasks.exe", "/Run", "/TN", "Codex Model Router")
+	}
+	taskXML, err := windowsTaskXML(binaryPath, dataDir)
+	if err != nil {
+		return err
+	}
+	taskPath := filepath.Join(dataDir, "windows-task.xml")
+	if err := atomicWrite(taskPath, encodeUTF16LE(taskXML), 0o600); err != nil {
+		return err
+	}
+	if err := execute("schtasks.exe", "/Create", "/F", "/TN", "Codex Model Router", "/XML", taskPath); err != nil {
+		return err
+	}
+	return execute("schtasks.exe", "/Run", "/TN", "Codex Model Router")
 }
 
 // Only stop an existing Windows task when its executable and data directory

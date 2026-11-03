@@ -15,6 +15,8 @@ def main() -> None:
         "uninstall-macos.sh",
         "doctor-macos.sh",
         "Install-Codex-Model-Router.command",
+        "change-deepseek-key-macos.sh",
+        "Change-DeepSeek-API-Key.command",
     }
     with tarfile.open(output, "w:gz") as archive:
         for path in sorted(stage.rglob("*")):

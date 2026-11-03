@@ -2,7 +2,7 @@
 
 让同一个 Codex 桌面客户端的原生模型菜单同时显示 OpenAI 和 DeepSeek。选择模型后，本地路由会把 Responses 请求转发到对应渠道，支持流式输出和工具调用。
 
-这是独立社区项目，与 OpenAI、DeepSeek 官方无隶属关系。当前版本为 **1.0.2**。
+这是独立社区项目，与 OpenAI、DeepSeek 官方无隶属关系。当前版本为 **1.0.3**。
 
 ## 下载安装
 
@@ -10,10 +10,10 @@
 
 | 平台 | 下载 | 解压后的安装入口 |
 | --- | --- | --- |
-| Windows x64 / Arm64 | [Windows 安装包](https://github.com/Grails125/codex-model-router/releases/download/v1.0.2/CodexModelRouter-v1.0.2.zip) | 双击 `install-windows.cmd` |
-| macOS Apple Silicon / Intel | [macOS 安装包](https://github.com/Grails125/codex-model-router/releases/download/v1.0.2/CodexModelRouter-v1.0.2-macOS.tar.gz) | 双击 `Install-Codex-Model-Router.command` |
+| Windows x64 / Arm64 | [Windows 安装包](https://github.com/Grails125/codex-model-router/releases/download/v1.0.3/CodexModelRouter-v1.0.3.zip) | 双击 `install-windows.cmd` |
+| macOS Apple Silicon / Intel | [macOS 安装包](https://github.com/Grails125/codex-model-router/releases/download/v1.0.3/CodexModelRouter-v1.0.3-macOS.tar.gz) | 双击 `Install-Codex-Model-Router.command` |
 
-[全部发布文件和 SHA-256 校验文件](https://github.com/Grails125/codex-model-router/releases/tag/v1.0.2)
+[全部发布文件和 SHA-256 校验文件](https://github.com/Grails125/codex-model-router/releases/tag/v1.0.3)
 
 必须先完整解压，再运行安装入口。安装包自带对应架构的程序，使用时不需要 Python、Node、WSL 或 Homebrew。
 
@@ -62,6 +62,21 @@ CODEX_HOME_FLAG="$HOME/custom-codex" CODEX_ROUTER_PORT=49627 ./install-macos.sh
 
 首选端口被占用时，安装器会自动选择空闲的本地端口。
 
+### 修改 DeepSeek API Key
+
+在完整解压的安装包中运行以下入口，输入新 Key 并回车：
+
+| 平台 | 双击入口 | 命令入口 |
+| --- | --- | --- |
+| Windows | `change-deepseek-key-windows.cmd` | `powershell.exe -NoProfile -ExecutionPolicy Bypass -File .\change-deepseek-key-windows.ps1` |
+| macOS | `Change-DeepSeek-API-Key.command` | `./change-deepseek-key-macos.sh` |
+
+输入内容隐藏，直接回车取消并保留原 Key。脚本仅原子替换本机 `deepseek.key`，下一次 DeepSeek 请求自动使用新 Key，**无需重启路由或 Codex**；正在执行的请求继续使用原 Key。更新不修改 OpenAI 登录、模型菜单或其他配置，也不会将 Key 写进命令行参数或输出。
+
+自定义 Codex 目录时，Windows 在脚本后添加 `-CodexHome 'C:\path\to\.codex'`，macOS 使用 `CODEX_HOME_FLAG="$HOME/custom-codex" ./change-deepseek-key-macos.sh`。
+
+自动化可将 Key 通过标准输入提供给 `codex-router set-key --stdin`，或仅为该进程设置 `DEEPSEEK_API_KEY` 后执行 `codex-router set-key`；支持 `--codex-home PATH` / `--data-dir PATH`。程序不接受直接传入 Key 的命令行参数。保存成功表示本机文件已更新，未调用 DeepSeek 验证有效性；Key 是否可用由后续 DeepSeek 请求确认。
+
 ## 工作方式与配置范围
 
 ```text
@@ -82,6 +97,8 @@ Codex 原生模型菜单
 安装器会备份 `~/.codex/config.toml`，修改 `model_provider`、生效的 `model_catalog_json` 和 `model_providers.codex-router` 配置，并保留 MCP、插件、hooks、信任设置等其他配置。运行文件位于 `~/.codex/codex-model-router/`。
 
 Windows 使用当前用户的计划任务 `Codex Model Router`，macOS 使用当前用户的 LaunchAgent `io.openai.codex-model-router`，在登录后启动后台路由。
+
+从 1.0.3 起，Windows 安装目录中的 `codex-router.exe` 是无窗口程序，后台运行不显示命令行窗口。安装器从本项目的程序生成该版本，复用匹配的旧任务，无需修改原任务启动路径；同目录另存 `codex-router-cli.exe`，用于安装、诊断、修改密钥和前台调试。安装包内的程序仍为命令行版，供安装脚本使用。macOS 继续通过 LaunchAgent 静默运行。安装、诊断和输入 Key 时打开的终端可以在操作完成后关闭；后台启动输出写入 `service.log`。
 
 DeepSeek 密钥保存在本机 `deepseek.key` 中，不会打印到安装输出。审计日志记录时间、模型、渠道、HTTP 状态、流式标志及连接诊断字段：失败阶段、固定错误分类、数字错误码、耗时、尝试次数、连接复用和代理使用情况。不记录原始异常文本、请求头、密钥或对话内容。不要分享个人 `config.toml`、`auth.json`、`settings.json`、`deepseek.key`、安装收据或未经检查的日志。
 
@@ -120,7 +137,7 @@ DeepSeek 密钥保存在本机 `deepseek.key` 中，不会打印到安装输出�
 | Windows x64 | 已实际验证安装、现有任务升级、健康检查、客户端模型列表和真实模型请求 |
 | Windows Arm64 | 已构建，未在 Arm64 设备运行验证 |
 | macOS Apple Silicon / Intel | 已构建并检查包内执行权限、脚本和 LaunchAgent XML；未在真实 Mac 上验证安装或运行 |
-| Go 测试与静态检查 | 28 项测试和 `go vet` 通过 |
+| Go 测试与静态检查 | 包含无窗口程序、任务迁移、密钥修改和运行中生效回归；`go test ./...` 和 `go vet` 通过 |
 
 双平台构建成功不等于双平台实机验收。macOS 安装包以未签名、未公证的形式提供。
 
@@ -142,7 +159,7 @@ go build -trimpath -o codex-router .
 Windows 上构建全部四种架构及发布安装包：
 
 ```powershell
-powershell.exe -NoProfile -ExecutionPolicy Bypass -File .\build.ps1 -Version 1.0.2
+powershell.exe -NoProfile -ExecutionPolicy Bypass -File .\build.ps1 -Version 1.0.3
 ```
 
 完整打包还需要 Python，仅用于生成保留 macOS 执行权限的 tar.gz，不是安装后的运行依赖。输出位于 `dist/`，包括 ZIP、macOS tar.gz 和各自的 SHA-256 校验文件。`deepseek_models.json` 保存 DeepSeek 模型定义，`models.go` 将其嵌入程序；远程 OpenAI 模型目录由路由按客户端版本和账户身份获取。

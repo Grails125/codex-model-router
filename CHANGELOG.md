@@ -1,3 +1,15 @@
+# v1.0.3
+
+Windows 后台路由不显示命令行窗口，并提供 Windows / macOS 修改 DeepSeek API Key 的入口。
+
+- Windows 安装器在原启动路径生成 GUI 子系统后台程序，复用现有计划任务，无需更新旧任务的权限；另存命令行版用于安装、诊断和前台调试。
+- 只复用本安装目录和数据目录匹配的旧任务，安装失败时恢复旧程序和配置，并处理 Windows 文件锁释放延迟。
+- 新增 `change-deepseek-key-windows.cmd` / `Change-DeepSeek-API-Key.command` 双击入口，隐藏输入新 Key；空输入取消。
+- 新增 `set-key --stdin` 命令及进程环境变量输入，原子更新本机凭据，不在参数、输出或配置中暴露 Key。
+- 运行中的路由从下一次 DeepSeek 请求起使用新 Key，无需重启 Codex 或后台服务；保存时不调用上游验证有效性。
+
+重新下载并完整解压安装包，运行安装入口即可升级。Windows x64 的本机运行结果在发布前验证；Windows Arm64 和 macOS 双架构已构建，仍未做对应设备验收。macOS 程序未签名、未公证。
+
 # v1.0.2
 
 改善 Responses 转发的连接恢复，并让 502 错误具备可定位的安全诊断。

@@ -1,5 +1,5 @@
 param(
-    [string]$Version = "1.0.2"
+    [string]$Version = "1.0.3"
 )
 
 $ErrorActionPreference = "Stop"
@@ -37,7 +37,9 @@ foreach ($target in $targets) {
 $releaseFiles = @(
     "README.md", "install-windows.ps1", "uninstall-windows.ps1",
     "doctor-windows.ps1", "install-windows.cmd", "install-macos.sh",
-    "uninstall-macos.sh", "doctor-macos.sh", "Install-Codex-Model-Router.command"
+    "uninstall-macos.sh", "doctor-macos.sh", "Install-Codex-Model-Router.command",
+    "change-deepseek-key-windows.ps1", "change-deepseek-key-windows.cmd",
+    "change-deepseek-key-macos.sh", "Change-DeepSeek-API-Key.command"
 )
 foreach ($name in $releaseFiles) {
     Copy-Item -LiteralPath (Join-Path $root $name) -Destination (Join-Path $stage $name)
