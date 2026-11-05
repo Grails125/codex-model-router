@@ -21,7 +21,7 @@ import (
 )
 
 const (
-	Version      = "1.0.3"
+	Version      = "1.0.4"
 	defaultPort  = 49627
 	serviceLabel = "io.openai.codex-model-router"
 )

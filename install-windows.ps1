@@ -57,5 +57,5 @@ finally {
 }
 
 Write-Host ""
-Write-Host "Installed. Finish active Codex work, restart the desktop app, and start a NEW chat."
+Write-Host "Installed. Finish active Codex work and restart the desktop app."
 Write-Host "The native model menu will show OpenAI and DeepSeek models together."

@@ -55,5 +55,5 @@ trap cleanup EXIT HUP INT TERM
 "$BINARY" install --codex-home "$CODEX_HOME_FLAG" --port "$PORT"
 "$BINARY" status --codex-home "$CODEX_HOME_FLAG"
 
-printf '\n%s\n' 'Installed. Finish active Codex work, restart the desktop app, and start a NEW chat.'
+printf '\n%s\n' 'Installed. Finish active Codex work and restart the desktop app.'
 printf '%s\n' 'The native model menu will show OpenAI and DeepSeek models together.'

@@ -2,7 +2,7 @@
 
 让同一个 Codex 桌面客户端的原生模型菜单同时显示 OpenAI 和 DeepSeek。选择模型后，本地路由会把 Responses 请求转发到对应渠道，支持流式输出和工具调用。
 
-这是独立社区项目，与 OpenAI、DeepSeek 官方无隶属关系。当前版本为 **1.0.3**。
+这是独立社区项目，与 OpenAI、DeepSeek 官方无隶属关系。当前版本为 **1.0.4**。
 
 ## 下载安装
 
@@ -10,10 +10,10 @@
 
 | 平台 | 下载 | 解压后的安装入口 |
 | --- | --- | --- |
-| Windows x64 / Arm64 | [Windows 安装包](https://github.com/Grails125/codex-model-router/releases/download/v1.0.3/CodexModelRouter-v1.0.3.zip) | 双击 `install-windows.cmd` |
-| macOS Apple Silicon / Intel | [macOS 安装包](https://github.com/Grails125/codex-model-router/releases/download/v1.0.3/CodexModelRouter-v1.0.3-macOS.tar.gz) | 双击 `Install-Codex-Model-Router.command` |
+| Windows x64 / Arm64 | [Windows 安装包](https://github.com/Grails125/codex-model-router/releases/download/v1.0.4/CodexModelRouter-v1.0.4.zip) | 双击 `install-windows.cmd` |
+| macOS Apple Silicon / Intel | [macOS 安装包](https://github.com/Grails125/codex-model-router/releases/download/v1.0.4/CodexModelRouter-v1.0.4-macOS.tar.gz) | 双击 `Install-Codex-Model-Router.command` |
 
-[全部发布文件和 SHA-256 校验文件](https://github.com/Grails125/codex-model-router/releases/tag/v1.0.3)
+[全部发布文件和 SHA-256 校验文件](https://github.com/Grails125/codex-model-router/releases/tag/v1.0.4)
 
 必须先完整解压，再运行安装入口。安装包自带对应架构的程序，使用时不需要 Python、Node、WSL 或 Homebrew。
 
@@ -21,11 +21,13 @@
 
 1. 结束正在执行的 Codex 任务。
 2. 完全退出并重新打开 Codex。
-3. **新建聊天**，再从输入框下方的原生模型菜单选择模型。
+3. 打开原有 OpenAI 聊天或新建聊天，从输入框下方的原生模型菜单选择模型。
 
 DeepSeek 模型为 `DeepSeek-Flash` 和 `DeepSeek-V4-Pro`。OpenAI 模型来自当前登录账户可访问的认证模型目录。安装器保留原有 OpenAI 登录信息。
 
-上面的 v1.0.3 安装包使用自定义提供商 `OpenAI + DeepSeek`，在该提供商下新建聊天后即可切换模型。从当前源码构建的安装器使用内置 `openai` 提供商连接本地路由，原有 OpenAI 聊天可以继续使用。模型菜单把两个 DeepSeek 模型排在 OpenAI 模型之后。由旧版自定义路由提供商创建的聊天仍保存原提供商标识。
+v1.0.4 使用内置 `openai` 提供商连接本地路由，原有 OpenAI 聊天可以继续使用。模型菜单把 `DeepSeek-Flash` 和 `DeepSeek-V4-Pro` 依次排在 OpenAI 模型之后。
+
+由旧版自定义路由提供商创建的聊天仍保存原提供商标识。继续这些聊天时，需要在 `config.toml` 中将 `model_provider` 切回该聊天保存的提供商，例如 `codex-router`，并重启 Codex。
 
 ### 命令安装
 
@@ -94,7 +96,7 @@ Codex 原生模型菜单
 
 将对话切回 OpenAI 时，路由会去掉其他模型的明文 reasoning 内容，保留可见消息及工具调用与结果。这项适配不代表不同模型的所有能力完全一致。
 
-安装器会备份 `~/.codex/config.toml`，并保留 MCP、插件、hooks 和信任设置等配置。当前源码的安装器设置 `model_provider = "openai"`，通过带本地凭据的 `openai_base_url` 连接路由，并禁用路由尚未支持的请求压缩。卸载时恢复原设置。运行文件位于 `~/.codex/codex-model-router/`。
+安装器会备份 `~/.codex/config.toml`，并保留 MCP、插件、hooks 和信任设置等配置。安装器设置 `model_provider = "openai"`，通过带本地凭据的 `openai_base_url` 连接路由，并禁用路由尚未支持的请求压缩。卸载时恢复原设置。运行文件位于 `~/.codex/codex-model-router/`。
 
 Windows 使用当前用户的计划任务 `Codex Model Router`，macOS 使用当前用户的 LaunchAgent `io.openai.codex-model-router`，在登录后启动后台路由。
 
@@ -113,7 +115,7 @@ DeepSeek 密钥保存在本机 `deepseek.key` 中，不会打印到安装输出�
 
 卸载会保留后来修改的无关配置，同时保留本机备份和程序以便恢复。带时间戳的配置备份位于 `~/.codex/codex-model-router/backups/`。
 
-模型菜单没有更新时，先运行诊断命令，再完全重启 Codex 并新建聊天。若请求出现 502，需继续检查本机网络、代理和上游连接；本地服务健康通过并不代表每次上游请求都会成功。
+模型菜单没有更新时，先运行诊断命令，再完全重启 Codex。若请求出现 502，检查本机网络、代理和上游连接。
 
 1.0.2 会复用上游 TCP/TLS 连接，并仅在确认 Responses 请求尚未发送的暂时建连故障后重试一次。请求可能已发送、收到上游 HTTP 错误、用户取消或响应流中断时，不自动重放请求。流中断会中止下游连接，避免正常 EOF 掩盖失败。
 
@@ -128,7 +130,7 @@ DeepSeek 密钥保存在本机 `deepseek.key` 中，不会打印到安装输出�
 - 重装保留本地路由凭据；Windows 复用匹配的计划任务，替换程序前停止该任务。
 - 安装失败时恢复之前的配置、运行设置、凭据、收据及程序。
 
-升级完成后仍需重启 Codex 并新建聊天。
+升级完成后需完全退出并重新打开 Codex。降级前先用 v1.0.4 的卸载入口恢复代理地址和请求压缩设置。
 
 ## 验证范围
 
@@ -159,7 +161,7 @@ go build -trimpath -o codex-router .
 Windows 上构建全部四种架构及发布安装包：
 
 ```powershell
-powershell.exe -NoProfile -ExecutionPolicy Bypass -File .\build.ps1 -Version 1.0.3
+powershell.exe -NoProfile -ExecutionPolicy Bypass -File .\build.ps1 -Version 1.0.4
 ```
 
 完整打包还需要 Python，仅用于生成保留 macOS 执行权限的 tar.gz，不是安装后的运行依赖。输出位于 `dist/`，包括 ZIP、macOS tar.gz 和各自的 SHA-256 校验文件。`deepseek_models.json` 保存 DeepSeek 模型定义，`models.go` 将其嵌入程序；远程 OpenAI 模型目录由路由按客户端版本和账户身份获取。

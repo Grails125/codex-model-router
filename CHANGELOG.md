@@ -1,3 +1,11 @@
+# v1.0.4
+
+- 使用内置 `openai` 提供商连接本地路由，原有 OpenAI 聊天可以继续使用，并可在同一聊天中切换 OpenAI 与 DeepSeek 模型。
+- 模型菜单依次将 `DeepSeek-Flash` 和 `DeepSeek-V4-Pro` 排在 OpenAI 模型之后。
+- 安装器备份代理地址及请求压缩设置，卸载时恢复原值，并保留旧路由入口。
+
+升级后完全退出并重新打开 Codex。由旧版自定义路由提供商创建的聊天仍保存原提供商标识，需要切回对应提供商才能继续。
+
 # v1.0.3
 
 Windows 后台路由不显示命令行窗口，并提供 Windows / macOS 修改 DeepSeek API Key 的入口。
