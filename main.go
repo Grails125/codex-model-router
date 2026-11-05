@@ -366,10 +366,10 @@ func commandInstall(args []string) (installErr error) {
 		}
 	}
 	result := map[string]any{
-		"status": "installed", "version": Version, "provider": "codex-router",
+		"status": "installed", "version": Version, "provider": "openai",
 		"port": *port, "data_dir": *dataDir, "config": configPath,
 		"backup": backupPath, "service": !*noService,
-		"next": "Restart Codex and start a new chat after finishing active work.",
+		"next": "Restart Codex after finishing active work.",
 	}
 	encoded, _ := json.MarshalIndent(result, "", "  ")
 	fmt.Println(string(encoded))
@@ -639,7 +639,7 @@ func commandDoctor(args []string) error {
 		"version": Version, "os": runtime.GOOS, "arch": runtime.GOARCH,
 		"config_exists": configErr == nil, "settings_valid": settingsErr == nil,
 		"deepseek_key_present": !keyMissing, "health": healthErr == nil,
-		"provider_configured": configErr == nil && strings.Contains(string(configRaw), `model_provider = "codex-router"`),
+		"provider_configured": configErr == nil && routerProviderConfigured(configRaw, options),
 	}
 	encoded, _ := json.MarshalIndent(result, "", "  ")
 	fmt.Println(string(encoded))

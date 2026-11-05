@@ -99,7 +99,19 @@ func (router *Router) ServeHTTP(w http.ResponseWriter, r *http.Request) {
 		writeError(w, http.StatusForbidden, "Only loopback requests are accepted")
 		return
 	}
-	if !router.authorized(r) {
+	const pathCredentialPrefix = "/__codex_router/"
+	if strings.HasPrefix(r.URL.EscapedPath(), pathCredentialPrefix) {
+		escapedKey, endpoint, found := strings.Cut(strings.TrimPrefix(r.URL.EscapedPath(), pathCredentialPrefix), "/")
+		key, err := url.PathUnescape(escapedKey)
+		if !found || err != nil || router.Options.RouterKey == "" || !constantTimeEqual(key, router.Options.RouterKey) {
+			writeError(w, http.StatusUnauthorized, "Local router credential required")
+			return
+		}
+		// Remove the local credential before endpoint handling or upstream requests.
+		r = r.Clone(r.Context())
+		r.URL.Path, r.URL.RawPath = "/"+endpoint, ""
+		r.RequestURI = r.URL.RequestURI()
+	} else if !router.authorized(r) {
 		writeError(w, http.StatusUnauthorized, "Local router credential required")
 		return
 	}

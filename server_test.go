@@ -6,6 +6,7 @@ import (
 	"io"
 	"net/http"
 	"net/http/httptest"
+	"net/url"
 	"strings"
 	"sync"
 	"testing"
@@ -154,8 +155,11 @@ func TestCatalogMergesAuthenticatedOpenAIAndDeepSeekModels(t *testing.T) {
 			r.Header.Get("ChatGPT-Account-ID") != "account-secret" {
 			t.Errorf("catalog auth not forwarded: %#v", r.Header)
 		}
+		if r.Header.Get("X-Codex-Router-Key") != "" || r.Header.Get("Referer") != "" || strings.Contains(r.RequestURI, "local-secret") {
+			t.Error("local credential reached catalog upstream")
+		}
 		w.Header().Set("Content-Type", "application/json")
-		_, _ = w.Write([]byte(`{"models":[{"slug":"gpt-6.1-sol","display_name":"GPT-6.1-Sol"}]}`))
+		_, _ = w.Write([]byte(`{"models":[{"slug":"gpt-6.1-sol","display_name":"GPT-6.1-Sol","priority":1},{"slug":"gpt-6-astra","display_name":"GPT-6-Astra","priority":1000}]}`))
 	}))
 	defer catalog.Close()
 	upstream := httptest.NewServer(http.NotFoundHandler())
@@ -183,13 +187,122 @@ func TestCatalogMergesAuthenticatedOpenAIAndDeepSeekModels(t *testing.T) {
 	if err := json.Unmarshal(response.Body.Bytes(), &body); err != nil {
 		t.Fatal(err)
 	}
-	slugs := map[string]bool{}
-	for _, model := range body.Models {
-		slugs[model["slug"].(string)] = true
+	wantOrder := []string{"gpt-6.1-sol", "gpt-6-astra", "deepseek-flash", "deepseek-v4-pro"}
+	if len(body.Models) != len(wantOrder) {
+		t.Fatalf("expected %d models, got %d", len(wantOrder), len(body.Models))
 	}
-	for _, want := range []string{"gpt-6.1-sol", "deepseek-flash", "deepseek-v4-pro"} {
-		if !slugs[want] {
-			t.Fatalf("missing %s from merged catalog: %#v", want, slugs)
+	lastPriority := 0.0
+	for i, want := range wantOrder {
+		model := body.Models[i]
+		if model["slug"] != want {
+			t.Fatalf("model %d = %v, want %s", i, model["slug"], want)
 		}
+		priority, ok := model["priority"].(float64)
+		if !ok || priority <= lastPriority {
+			t.Fatalf("%s priority = %v, want greater than %v", want, model["priority"], lastPriority)
+		}
+		lastPriority = priority
+	}
+	request.URL.Path = "/__codex_router/" + router.Options.RouterKey + "/backend-api/codex/models"
+	request.Header.Del("X-Codex-Router-Key")
+	request.Header.Set("Referer", request.URL.String())
+	response = httptest.NewRecorder()
+	router.ServeHTTP(response, request)
+	if response.Code != http.StatusOK {
+		t.Fatalf("path-authenticated catalog status=%d body=%s", response.Code, response.Body.String())
+	}
+}
+
+func TestPathCredentialAcceptsEscapedKey(t *testing.T) {
+	router, _, _, captured := newTestRouter(t)
+	router.Options.RouterKey = "local-secret/with?reserved%characters#"
+	request := httptest.NewRequest(http.MethodPost,
+		"http://127.0.0.1/__codex_router/"+url.PathEscape(router.Options.RouterKey)+"/backend-api/codex/responses",
+		strings.NewReader(`{"model":"gpt-6.1-sol"}`))
+	request.Header.Set("Authorization", "Bearer openai-secret")
+	response := httptest.NewRecorder()
+	router.ServeHTTP(response, request)
+	if response.Code != http.StatusOK {
+		t.Fatalf("escaped-key request status=%d", response.Code)
+	}
+	requests := captured()
+	if len(requests) != 1 || requests[0].Path != "/openai/responses" {
+		t.Fatalf("unexpected upstream request: %#v", requests)
+	}
+}
+
+func TestPathCredentialRoutesWithoutLeakingCredential(t *testing.T) {
+	for _, test := range []struct {
+		name, model, endpoint, upstream string
+		status                          int
+	}{
+		{"OpenAI", "gpt-6.1-sol", "/responses", "/openai/responses", http.StatusOK},
+		{"DeepSeek", "deepseek-flash", "/responses", "/deepseek/responses", http.StatusOK},
+		{"OpenAI compact", "gpt-6.1-sol", "/responses/compact", "/openai/responses/compact", http.StatusOK},
+		{"DeepSeek compact", "deepseek-flash", "/responses/compact", "", http.StatusBadRequest},
+	} {
+		t.Run(test.name, func(t *testing.T) {
+			router, _, _, captured := newTestRouter(t)
+			response := postRouter(t, router, `{"model":"`+test.model+`"}`, func(r *http.Request) {
+				r.URL.Path = "/__codex_router/" + router.Options.RouterKey + "/backend-api/codex" + test.endpoint
+				r.RequestURI = r.URL.RequestURI()
+				r.Header.Del("X-Codex-Router-Key")
+				r.Header.Set("Referer", r.URL.String())
+			})
+			if response.Code != test.status {
+				t.Fatalf("status=%d body=%s", response.Code, response.Body.String())
+			}
+			requests := captured()
+			if test.upstream == "" {
+				if len(requests) != 0 {
+					t.Fatal("rejected request reached upstream")
+				}
+				return
+			}
+			if len(requests) != 1 || requests[0].Path != test.upstream {
+				t.Fatalf("unexpected upstream request: %#v", requests)
+			}
+			raw, err := json.Marshal(requests[0])
+			if err != nil {
+				t.Fatal(err)
+			}
+			if bytes.Contains(raw, []byte(router.Options.RouterKey)) || strings.Contains(response.Body.String(), router.Options.RouterKey) {
+				t.Fatal("local credential escaped the routing boundary")
+			}
+		})
+	}
+}
+
+func TestPathCredentialRejectsInvalidRequests(t *testing.T) {
+	key := "local-secret-at-least-24-bytes"
+	for _, test := range []struct {
+		name, path, host, origin string
+		status                   int
+	}{
+		{"missing", "/__codex_router/", "127.0.0.1", "", http.StatusUnauthorized},
+		{"wrong", "/__codex_router/wrong/backend-api/codex/responses", "127.0.0.1", "", http.StatusUnauthorized},
+		{"empty", "/__codex_router//backend-api/codex/responses", "127.0.0.1", "", http.StatusUnauthorized},
+		{"no endpoint", "/__codex_router/" + key, "127.0.0.1", "", http.StatusUnauthorized},
+		{"encoded separator", "/__codex_router/" + key + "%2Fbackend-api/codex/responses", "127.0.0.1", "", http.StatusUnauthorized},
+		{"encoded endpoint", "/__codex_router/" + key + "/backend-api%2Fcodex/responses", "127.0.0.1", "", http.StatusNotFound},
+		{"double separator", "/__codex_router/" + key + "//backend-api/codex/responses", "127.0.0.1", "", http.StatusNotFound},
+		{"traversal", "/__codex_router/" + key + "/../backend-api/codex/responses", "127.0.0.1", "", http.StatusNotFound},
+		{"external host", "/__codex_router/" + key + "/backend-api/codex/responses", "example.com", "", http.StatusForbidden},
+		{"browser origin", "/__codex_router/" + key + "/backend-api/codex/responses", "127.0.0.1", "https://example.com", http.StatusForbidden},
+	} {
+		t.Run(test.name, func(t *testing.T) {
+			router, _, _, captured := newTestRouter(t)
+			request := httptest.NewRequest(http.MethodPost, "http://"+test.host+test.path, strings.NewReader(`{"model":"gpt-6.1-sol"}`))
+			request.Header.Set("Authorization", "Bearer openai-secret")
+			request.Header.Set("Origin", test.origin)
+			response := httptest.NewRecorder()
+			router.ServeHTTP(response, request)
+			if response.Code != test.status {
+				t.Fatalf("status=%d want=%d", response.Code, test.status)
+			}
+			if len(captured()) != 0 || strings.Contains(response.Body.String(), key) {
+				t.Fatal("invalid request escaped the routing boundary")
+			}
+		})
 	}
 }

@@ -23,9 +23,9 @@
 2. 完全退出并重新打开 Codex。
 3. **新建聊天**，再从输入框下方的原生模型菜单选择模型。
 
-DeepSeek 模型为 `DeepSeek-Flash` 和 `DeepSeek-V4-Pro`。OpenAI 模型来自当前登录账户可访问的认证模型目录。设置中的提供商名称显示为 `OpenAI + DeepSeek`。
+DeepSeek 模型为 `DeepSeek-Flash` 和 `DeepSeek-V4-Pro`。OpenAI 模型来自当前登录账户可访问的认证模型目录。安装器保留原有 OpenAI 登录信息。
 
-旧聊天保留创建时的提供商。在使用新提供商创建的聊天中，可以切换 OpenAI 和 DeepSeek，无需打开第二个客户端或一直保留终端窗口。安装器保留原有 OpenAI 登录信息。
+上面的 v1.0.3 安装包使用自定义提供商 `OpenAI + DeepSeek`，在该提供商下新建聊天后即可切换模型。从当前源码构建的安装器使用内置 `openai` 提供商连接本地路由，原有 OpenAI 聊天可以继续使用。模型菜单把两个 DeepSeek 模型排在 OpenAI 模型之后。由旧版自定义路由提供商创建的聊天仍保存原提供商标识。
 
 ### 命令安装
 
@@ -94,13 +94,13 @@ Codex 原生模型菜单
 
 将对话切回 OpenAI 时，路由会去掉其他模型的明文 reasoning 内容，保留可见消息及工具调用与结果。这项适配不代表不同模型的所有能力完全一致。
 
-安装器会备份 `~/.codex/config.toml`，修改 `model_provider`、生效的 `model_catalog_json` 和 `model_providers.codex-router` 配置，并保留 MCP、插件、hooks、信任设置等其他配置。运行文件位于 `~/.codex/codex-model-router/`。
+安装器会备份 `~/.codex/config.toml`，并保留 MCP、插件、hooks 和信任设置等配置。当前源码的安装器设置 `model_provider = "openai"`，通过带本地凭据的 `openai_base_url` 连接路由，并禁用路由尚未支持的请求压缩。卸载时恢复原设置。运行文件位于 `~/.codex/codex-model-router/`。
 
 Windows 使用当前用户的计划任务 `Codex Model Router`，macOS 使用当前用户的 LaunchAgent `io.openai.codex-model-router`，在登录后启动后台路由。
 
 从 1.0.3 起，Windows 安装目录中的 `codex-router.exe` 是无窗口程序，后台运行不显示命令行窗口。安装器从本项目的程序生成该版本，复用匹配的旧任务，无需修改原任务启动路径；同目录另存 `codex-router-cli.exe`，用于安装、诊断、修改密钥和前台调试。安装包内的程序仍为命令行版，供安装脚本使用。macOS 继续通过 LaunchAgent 静默运行。安装、诊断和输入 Key 时打开的终端可以在操作完成后关闭；后台启动输出写入 `service.log`。
 
-DeepSeek 密钥保存在本机 `deepseek.key` 中，不会打印到安装输出。审计日志记录时间、模型、渠道、HTTP 状态、流式标志及连接诊断字段：失败阶段、固定错误分类、数字错误码、耗时、尝试次数、连接复用和代理使用情况。不记录原始异常文本、请求头、密钥或对话内容。不要分享个人 `config.toml`、`auth.json`、`settings.json`、`deepseek.key`、安装收据或未经检查的日志。
+DeepSeek 密钥保存在本机 `deepseek.key` 中，不会打印到安装输出。路由审计日志记录时间、模型、渠道、HTTP 状态、流式标志和连接诊断字段，不记录原始异常文本、请求头、密钥或对话内容。Codex 客户端的诊断日志可能包含带本地凭据的路由 URL。分享日志前先脱敏，个人 `config.toml`、`auth.json`、`settings.json`、`deepseek.key` 和安装收据也应妥善保管。
 
 ## 诊断与卸载
 

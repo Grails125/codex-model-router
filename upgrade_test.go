@@ -225,3 +225,41 @@ func TestTaskIdentityRequiresMatchingBinaryAndDataDirectory(t *testing.T) {
 		}
 	}
 }
+
+func TestDoctorAcceptsNativeProviderAndRejectsMismatchedBaseURL(t *testing.T) {
+	router, err := NewRouter(RuntimeOptions{RouterKey: upgradeTestKey, Version: Version},
+		func() (string, error) { return "test-deepseek-key", nil }, func(AuditRecord) {})
+	if err != nil {
+		t.Fatal(err)
+	}
+	server := httptest.NewServer(router)
+	defer server.Close()
+	root := t.TempDir()
+	dataDir := filepath.Join(root, "codex-model-router")
+	if err := os.MkdirAll(dataDir, 0700); err != nil {
+		t.Fatal(err)
+	}
+	options := RuntimeOptions{Port: testServerPort(t, server), RouterKey: upgradeTestKey, Version: Version}
+	raw, _ := json.Marshal(options)
+	if err := os.WriteFile(filepath.Join(dataDir, "settings.json"), raw, 0600); err != nil {
+		t.Fatal(err)
+	}
+	if err := os.WriteFile(filepath.Join(dataDir, "deepseek.key"), []byte("test-deepseek-key"), 0600); err != nil {
+		t.Fatal(err)
+	}
+	for name, baseURL := range map[string]string{
+		"native":  fmt.Sprintf("http://127.0.0.1:%d/__codex_router/%s/backend-api/codex", options.Port, upgradeTestKey),
+		"foreign": "https://foreign.example/v1",
+	} {
+		t.Run(name, func(t *testing.T) {
+			config := fmt.Sprintf("model_provider = \"openai\"\nopenai_base_url = %q\nfeatures.enable_request_compression = false\n", baseURL)
+			if err := os.WriteFile(filepath.Join(root, "config.toml"), []byte(config), 0600); err != nil {
+				t.Fatal(err)
+			}
+			err := commandDoctor([]string{"--codex-home", root})
+			if (err == nil) != (name == "native") {
+				t.Fatalf("doctor native config validation got err=%v", err)
+			}
+		})
+	}
+}

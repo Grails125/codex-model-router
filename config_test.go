@@ -5,6 +5,24 @@ import (
 	"testing"
 )
 
+func TestNativeProviderDoctorRejectsCompressedRequests(t *testing.T) {
+	options := RuntimeOptions{Port: 49627, RouterKey: "router-secret-at-least-24-bytes"}
+	active, _, err := ActivateConfig(nil, InstallOptions{Port: options.Port, RouterKey: options.RouterKey})
+	if err != nil {
+		t.Fatal(err)
+	}
+	for name, config := range map[string]string{
+		"enabled": strings.Replace(string(active), "features.enable_request_compression = false", "features.enable_request_compression = true", 1),
+		"default": strings.Replace(string(active), "features.enable_request_compression = false\n", "", 1),
+	} {
+		t.Run(name, func(t *testing.T) {
+			if routerProviderConfigured([]byte(config), options) {
+				t.Fatal("native provider with unsupported request compression reported healthy")
+			}
+		})
+	}
+}
+
 func TestActivateConfigPreservesUnrelatedSettingsAndCanRollback(t *testing.T) {
 	original := strings.Join([]string{
 		`model = "gpt-6.1-sol"`,
@@ -29,7 +47,7 @@ func TestActivateConfigPreservesUnrelatedSettingsAndCanRollback(t *testing.T) {
 	}
 	text := string(activated)
 	for _, want := range []string{
-		`model_provider = "codex-router"`,
+		`model_provider = "openai"`,
 		`[model_providers.codex-router]`,
 		`base_url = "http://127.0.0.1:49627/backend-api/codex"`,
 		`http_headers = { "X-Codex-Router-Key" = "router-secret-at-least-24-bytes" }`,
@@ -113,7 +131,7 @@ func TestActivateConfigWithDefaultOpenAIProviderCanRollback(t *testing.T) {
 			if receipt.OriginalProvider != "" {
 				t.Fatalf("default provider was made explicit in receipt: %+v", receipt)
 			}
-			if !strings.Contains(string(activated), `model_provider = "codex-router"`) {
+			if !strings.Contains(string(activated), `model_provider = "openai"`) {
 				t.Fatal("router provider was not activated")
 			}
 			restored, err := RestoreConfig(activated, receipt)
@@ -125,6 +143,172 @@ func TestActivateConfigWithDefaultOpenAIProviderCanRollback(t *testing.T) {
 			}
 			if strings.TrimSpace(string(restored)) != strings.TrimSpace(original) {
 				t.Fatalf("rollback changed unrelated settings: want %q, got %q", original, restored)
+			}
+		})
+	}
+}
+
+func TestNativeOpenAIProviderKeepsHistoryIdentityAndRestoresBaseURL(t *testing.T) {
+	original := []byte("model_provider = \"openai\"\nopenai_base_url = \"https://existing.example/v1\"\nweb_search = \"cached\"\n")
+	active, receipt, err := ActivateConfig(original, InstallOptions{Port: 48123, RouterKey: "test-router-key-at-least-24-bytes"})
+	if err != nil {
+		t.Fatal(err)
+	}
+	for _, want := range []string{
+		`model_provider = "openai"`,
+		`openai_base_url = "http://127.0.0.1:48123/__codex_router/test-router-key-at-least-24-bytes/backend-api/codex"`,
+	} {
+		if !strings.Contains(string(active), want) {
+			t.Fatalf("native routing missing %q", want)
+		}
+	}
+	restored, err := RestoreConfig(active, receipt)
+	if err != nil {
+		t.Fatal(err)
+	}
+	if strings.TrimSpace(string(restored)) != strings.TrimSpace(string(original)) {
+		t.Fatalf("original OpenAI base URL was not restored: %s", restored)
+	}
+}
+
+func TestNativeOpenAIProviderEscapesCredentialAndPreservesURLAcrossReinstall(t *testing.T) {
+	original := []byte("openai_base_url = \"https://existing.example/v1\"\n")
+	first, receipt, err := ActivateConfig(original, InstallOptions{Port: 48123, RouterKey: "test-router-key-with /slash?&%=value"})
+	if err != nil {
+		t.Fatal(err)
+	}
+	if !strings.Contains(string(first), `/__codex_router/test-router-key-with%20%2Fslash%3F&%25=value/backend-api/codex`) {
+		t.Fatal("router credential was not escaped as one URL path segment")
+	}
+	second, secondReceipt, err := ActivateConfig(first, InstallOptions{Port: 48124, RouterKey: "replacement-test-router-key-24bytes", Previous: &receipt})
+	if err != nil {
+		t.Fatal(err)
+	}
+	restored, err := RestoreConfig(second, secondReceipt)
+	if err != nil {
+		t.Fatal(err)
+	}
+	if strings.TrimSpace(string(restored)) != strings.TrimSpace(string(original)) {
+		t.Fatalf("reinstall replaced the original OpenAI base URL: %s", restored)
+	}
+}
+
+func TestNativeOpenAIUpgradeFromLegacyReceiptRestoresExistingBaseURL(t *testing.T) {
+	original := []byte("model_provider = \"codex-router\"\nopenai_base_url = \"https://existing.example/v1\"\n")
+	legacyReceipt := InstallReceipt{OriginalProvider: "openai"}
+	active, receipt, err := ActivateConfig(original, InstallOptions{
+		Port: 48123, RouterKey: "test-router-key-at-least-24-bytes", Previous: &legacyReceipt,
+	})
+	if err != nil {
+		t.Fatal(err)
+	}
+	restored, err := RestoreConfig(active, receipt)
+	if err != nil {
+		t.Fatal(err)
+	}
+	if !strings.Contains(string(restored), `openai_base_url = "https://existing.example/v1"`) {
+		t.Fatal("upgrade lost the existing OpenAI base URL")
+	}
+	legacyRestored, err := RestoreConfig(original, legacyReceipt)
+	if err != nil {
+		t.Fatal(err)
+	}
+	if !strings.Contains(string(legacyRestored), `openai_base_url = "https://existing.example/v1"`) {
+		t.Fatal("legacy uninstall changed an unmanaged OpenAI base URL")
+	}
+}
+
+func TestActivateConfigAcceptsTOMLStringURLsAndInlineComments(t *testing.T) {
+	for name, setting := range map[string]string{
+		"literal":              `openai_base_url = 'https://existing.example/v1#literal'`,
+		"basic with comment":   `openai_base_url = "https://existing.example/v1#literal" # original endpoint`,
+		"literal with comment": `openai_base_url = 'https://existing.example/v1#literal' # original endpoint`,
+	} {
+		t.Run(name, func(t *testing.T) {
+			original := []byte("model_provider = 'openai' # builtin\n" + setting + "\n")
+			active, receipt, err := ActivateConfig(original, InstallOptions{
+				Port: 48123, RouterKey: "test-router-key-at-least-24-bytes",
+			})
+			if err != nil {
+				t.Fatal(err)
+			}
+			restored, err := RestoreConfig(active, receipt)
+			if err != nil {
+				t.Fatal(err)
+			}
+			lines, _ := splitLinesPreserve(string(restored))
+			baseURL, err := topLevelValue(lines, "openai_base_url")
+			if err != nil || baseURL != "https://existing.example/v1#literal" {
+				t.Fatalf("OpenAI URL did not roundtrip: value=%q err=%v", baseURL, err)
+			}
+		})
+	}
+}
+
+func TestNativeRoutingDisablesRequestCompressionAndRestoresOriginal(t *testing.T) {
+	for name, original := range map[string]string{
+		"empty":                    "",
+		"feature table enabled":    "[features]\nenable_request_compression = true # keep this comment\nother_feature = true\n",
+		"feature table disabled":   "[features]\nenable_request_compression = false\nother_feature = true\n",
+		"feature table absent key": "[features]\nother_feature = true\n",
+		"quoted feature table":     "[ \"features\" ]\n'enable_request_compression' = true\n",
+		"dotted enabled":           "features.enable_request_compression = true # dotted\nfeatures.other_feature = true\n",
+		"spaced dotted enabled":    "\"features\" . 'enable_request_compression' = true\n",
+		"other dotted feature":     "features.other_feature = true\n",
+	} {
+		t.Run(name, func(t *testing.T) {
+			active, receipt, err := ActivateConfig([]byte(original), InstallOptions{Port: 48123, RouterKey: "test-router-key-at-least-24-bytes"})
+			if err != nil {
+				t.Fatal(err)
+			}
+			lines, _ := splitLinesPreserve(string(active))
+			setting, _, err := requestCompressionLocation(lines)
+			if err != nil || setting < 0 || !strings.Contains(lines[setting], "= false") {
+				t.Fatal("native routing did not disable request compression")
+			}
+			second, secondReceipt, err := ActivateConfig(active, InstallOptions{Port: 48123, RouterKey: "test-router-key-at-least-24-bytes", Previous: &receipt})
+			if err != nil {
+				t.Fatal(err)
+			}
+			restored, err := RestoreConfig(second, secondReceipt)
+			if err != nil {
+				t.Fatal(err)
+			}
+			if strings.TrimSpace(string(restored)) != strings.TrimSpace(original) {
+				t.Fatalf("request compression rollback changed unrelated configuration:\nwant: %s\ngot: %s", original, restored)
+			}
+		})
+	}
+}
+
+func TestNativeRoutingCompressionUpgradeFromLegacyReceipt(t *testing.T) {
+	original := []byte("model_provider = \"openai\"\n[features]\nenable_request_compression = true\n")
+	legacy := InstallReceipt{OriginalProvider: "openai"}
+	active, receipt, err := ActivateConfig(original, InstallOptions{Port: 48123, RouterKey: "test-router-key-at-least-24-bytes", Previous: &legacy})
+	if err != nil {
+		t.Fatal(err)
+	}
+	if !strings.Contains(string(active), "enable_request_compression = false") {
+		t.Fatal("legacy upgrade did not disable request compression")
+	}
+	restored, err := RestoreConfig(active, receipt)
+	if err != nil {
+		t.Fatal(err)
+	}
+	if strings.TrimSpace(string(restored)) != strings.TrimSpace(string(original)) {
+		t.Fatal("legacy upgrade lost original request compression value")
+	}
+}
+
+func TestActivateConfigRejectsInlineFeaturesTable(t *testing.T) {
+	for _, key := range []string{"features", `"features"`, "'features'"} {
+		t.Run(key, func(t *testing.T) {
+			original := []byte(key + " = { unrelated = true }\n")
+			active, _, err := ActivateConfig(original, InstallOptions{
+				Port: 48123, RouterKey: "test-router-key-at-least-24-bytes",
+			})
+			if err == nil || !strings.Contains(err.Error(), "top-level features") || active != nil {
+				t.Fatalf("expected an actionable preflight error, got %v", err)
 			}
 		})
 	}

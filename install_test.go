@@ -39,7 +39,7 @@ enabled-reasoning-efforts = ["low", "high"]
 		t.Fatal("settings are not valid JSON")
 	}
 	if got := string(activated); !containsAll(got,
-		`model_provider = "codex-router"`,
+		`model_provider = "openai"`,
 		`[model_providers.codex-router]`,
 		`[desktop]`,
 	) {
@@ -93,7 +93,7 @@ func TestInstallWithoutConfigUsesDefaultsAndCanUninstall(t *testing.T) {
 		t.Fatal(err)
 	}
 	configPath := filepath.Join(codexHome, "config.toml")
-	if !strings.Contains(string(mustRead(t, configPath)), `model_provider = "codex-router"`) {
+	if !strings.Contains(string(mustRead(t, configPath)), `model_provider = "openai"`) {
 		t.Fatal("first installation did not create the router configuration")
 	}
 	receipt, err := readReceipt(filepath.Join(codexHome, "codex-model-router"))
