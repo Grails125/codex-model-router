@@ -165,3 +165,11 @@ powershell.exe -NoProfile -ExecutionPolicy Bypass -File .\build.ps1 -Version 1.0
 ```
 
 完整打包还需要 Python，仅用于生成保留 macOS 执行权限的 tar.gz，不是安装后的运行依赖。输出位于 `dist/`，包括 ZIP、macOS tar.gz 和各自的 SHA-256 校验文件。`deepseek_models.json` 保存 DeepSeek 模型定义，`models.go` 将其嵌入程序；远程 OpenAI 模型目录由路由按客户端版本和账户身份获取。
+
+## 许可证
+
+项目原创部分采用 [MIT 许可证](LICENSE)。从 OpenAI Codex 改编的模型目录内容采用 [Apache 2.0 许可证](LICENSE-APACHE)，来源见 [NOTICE](NOTICE)。
+
+## 社区
+
+[LINUX DO](https://linux.do/)

@@ -35,7 +35,8 @@ foreach ($target in $targets) {
 }
 
 $releaseFiles = @(
-    "README.md", "install-windows.ps1", "uninstall-windows.ps1",
+    "README.md", "LICENSE", "LICENSE-APACHE", "NOTICE",
+    "install-windows.ps1", "uninstall-windows.ps1",
     "doctor-windows.ps1", "install-windows.cmd", "install-macos.sh",
     "uninstall-macos.sh", "doctor-macos.sh", "Install-Codex-Model-Router.command",
     "change-deepseek-key-windows.ps1", "change-deepseek-key-windows.cmd",

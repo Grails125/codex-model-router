@@ -1,0 +1,8 @@
+OpenAI Codex
+Copyright 2025 OpenAI
+
+The embedded model catalog in deepseek_models.json incorporates material from
+the OpenAI Codex model catalog, adapted for DeepSeek by Grails125.
+
+Source: https://github.com/openai/codex/blob/126a0ee92ed2c5e73cd8a8f7e37563e8527552d7/codex-rs/models-manager/models.json
+License: Apache License, Version 2.0 (see LICENSE-APACHE).

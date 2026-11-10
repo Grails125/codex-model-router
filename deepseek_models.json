@@ -1,4 +1,5 @@
 {
+  "source_notice": "Includes material from OpenAI Codex (Copyright 2025 OpenAI) under Apache-2.0, modified for DeepSeek by Grails125. See NOTICE and LICENSE-APACHE.",
   "models": [
     {
       "slug": "deepseek-flash",
