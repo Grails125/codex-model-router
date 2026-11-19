@@ -43,6 +43,8 @@ func main() {
 		err = commandStatus(os.Args[2:])
 	case "doctor":
 		err = commandDoctor(os.Args[2:])
+	case "deepseek":
+		err = commandDeepSeek(os.Args[2:])
 	case "set-key":
 		err = commandSetKey(os.Args[2:])
 	case "version":
@@ -67,6 +69,7 @@ Commands:
   serve      Run the loopback router in the foreground
   status     Check the router and report safe configuration state
   doctor     Validate runtime, credentials, config and service health
+  deepseek   Start or resume Codex CLI with a DeepSeek model
   set-key    Replace the DeepSeek key from --stdin or DEEPSEEK_API_KEY
   version    Print the binary version and platform
 

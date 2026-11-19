@@ -104,6 +104,19 @@ Windows 使用当前用户的计划任务 `Codex Model Router`，macOS 使用当
 
 DeepSeek 密钥保存在本机 `deepseek.key` 中，不会打印到安装输出。路由审计日志记录时间、模型、渠道、HTTP 状态、流式标志和连接诊断字段，不记录原始异常文本、请求头、密钥或对话内容。Codex 客户端的诊断日志可能包含带本地凭据的路由 URL。分享日志前先脱敏，个人 `config.toml`、`auth.json`、`settings.json`、`deepseek.key` 和安装收据也应妥善保管。
 
+## Codex 额度耗尽时继续用 DeepSeek
+
+某些 Codex 桌面版本以 ChatGPT 账号额度控制本机输入框。额度用完时，桌面可能在请求进入本地路由前就禁用发送，切换模型后也一样。可以在终端使用 Codex CLI 继续对话，DeepSeek 请求仍使用路由已保存的 DeepSeek Key。
+
+确认本地路由正在运行，并且 `codex` 在终端的 PATH 中。从当前源码构建的路由提供以下命令。Windows 使用安装目录里的 `codex-router-cli.exe`。
+
+```text
+codex-router deepseek
+codex-router deepseek --model deepseek-v4-pro --resume SESSION_ID
+```
+
+也可以直接运行 `codex -m deepseek-flash`，或用 `codex resume -m deepseek-flash SESSION_ID` 继续已有会话。恢复会话要求当前 provider 与会话保存的 provider 一致。v1.0.4 安装默认使用 `openai`。OpenAI 模型和依赖 OpenAI 的功能仍受 Codex 额度限制。
+
 ## 诊断与卸载
 
 在原安装包解压目录中运行：

@@ -9,6 +9,7 @@ import (
 	"net/url"
 	"strings"
 	"sync"
+	"sync/atomic"
 	"testing"
 )
 
@@ -91,6 +92,55 @@ func TestDeepSeekGetsOnlyItsCredential(t *testing.T) {
 	if requests[0].Headers.Get("ChatGPT-Account-ID") != "" || requests[0].Headers.Get("Cookie") != "" ||
 		requests[0].Headers.Get("X-Codex-Router-Key") != "" {
 		t.Fatalf("foreign credentials reached DeepSeek: %#v", requests[0].Headers)
+	}
+}
+
+func TestDeepSeekRequestIsIndependentOfOpenAIQuota(t *testing.T) {
+	var openAICalls, deepSeekCalls atomic.Int32
+	upstream := httptest.NewServer(http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
+		switch r.URL.Path {
+		case "/openai/responses":
+			openAICalls.Add(1)
+			if r.Header.Get("Authorization") != "Bearer openai-secret" || r.Header.Get("ChatGPT-Account-ID") != "account-secret" {
+				t.Error("OpenAI did not receive its account credentials")
+			}
+			w.WriteHeader(http.StatusTooManyRequests)
+			_, _ = io.WriteString(w, `{"error":{"type":"usage_limit_reached"}}`)
+		case "/deepseek/responses":
+			deepSeekCalls.Add(1)
+			if r.Header.Get("Authorization") != "Bearer deepseek-secret" || r.Header.Get("ChatGPT-Account-ID") != "" {
+				t.Error("DeepSeek did not receive only its own credentials")
+			}
+			w.Header().Set("Content-Type", "text/event-stream")
+			_, _ = io.WriteString(w, "data: {\"type\":\"response.completed\"}\n\n")
+		default:
+			t.Errorf("unexpected upstream path %q", r.URL.Path)
+			w.WriteHeader(http.StatusNotFound)
+		}
+	}))
+	defer upstream.Close()
+	router, err := NewRouter(RuntimeOptions{
+		RouterKey: "local-secret-at-least-24-bytes", OpenAIURL: upstream.URL + "/openai",
+		DeepSeekURL: upstream.URL + "/deepseek",
+	}, func() (string, error) { return "deepseek-secret", nil }, nil)
+	if err != nil {
+		t.Fatal(err)
+	}
+	requestOpenAI := func() {
+		t.Helper()
+		response := postRouter(t, router, `{"model":"gpt-6.2-sol","stream":true}`)
+		if response.Code != http.StatusTooManyRequests || !strings.Contains(response.Body.String(), "usage_limit_reached") {
+			t.Fatalf("OpenAI quota response was not preserved: %d %s", response.Code, response.Body.String())
+		}
+	}
+	requestOpenAI()
+	response := postRouter(t, router, `{"model":"deepseek-flash","stream":true}`)
+	if response.Code != http.StatusOK || !strings.Contains(response.Body.String(), "response.completed") {
+		t.Fatalf("DeepSeek did not complete after OpenAI quota exhaustion: %d %s", response.Code, response.Body.String())
+	}
+	requestOpenAI()
+	if openAI, deepSeek := openAICalls.Load(), deepSeekCalls.Load(); openAI != 2 || deepSeek != 1 {
+		t.Fatalf("expected two OpenAI calls and one DeepSeek call, got %d and %d", openAI, deepSeek)
 	}
 }
 
