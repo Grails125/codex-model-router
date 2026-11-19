@@ -1,3 +1,11 @@
+# v1.0.5
+
+- 新增 `codex-router deepseek`，支持在 Codex CLI 中用 DeepSeek 新建对话，或通过 `--resume SESSION_ID` 继续原有会话。Windows 使用 `codex-router-cli.exe`。
+- 增加额度耗尽回归测试。OpenAI 返回 429 后，DeepSeek 仍使用自己的 Key 完成请求。切回 OpenAI 时保留其额度错误。
+- 安装包包含项目许可证和模型目录的来源说明。
+
+Codex 桌面额度提示禁用发送时，可用新命令在终端继续。桌面发送按钮仍由 Codex 客户端控制。
+
 # v1.0.4
 
 - 使用内置 `openai` 提供商连接本地路由，原有 OpenAI 聊天可以继续使用，并可在同一聊天中切换 OpenAI 与 DeepSeek 模型。
