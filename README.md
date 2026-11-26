@@ -1,8 +1,8 @@
 # Codex Model Router
 
-让同一个 Codex 桌面客户端的原生模型菜单同时显示 OpenAI 和 DeepSeek。选择模型后，本地路由会把 Responses 请求转发到对应渠道，支持流式输出和工具调用。
+让同一个 Codex 桌面客户端的原生模型菜单同时显示 OpenAI、DeepSeek 和可选的 OpenCode Go。选择模型后，本地路由会把 Responses 请求转发到对应渠道，支持流式输出和工具调用。
 
-这是独立社区项目，与 OpenAI、DeepSeek 官方无隶属关系。当前版本为 **1.0.5**。
+这是独立社区项目，与 OpenAI、DeepSeek、OpenCode 官方无隶属关系。当前版本为 **1.1.0**。
 
 ## 下载安装
 
@@ -10,10 +10,10 @@
 
 | 平台 | 下载 | 解压后的安装入口 |
 | --- | --- | --- |
-| Windows x64 / Arm64 | [Windows 安装包](https://github.com/Grails125/codex-model-router/releases/download/v1.0.5/CodexModelRouter-v1.0.5.zip) | 双击 `install-windows.cmd` |
-| macOS Apple Silicon / Intel | [macOS 安装包](https://github.com/Grails125/codex-model-router/releases/download/v1.0.5/CodexModelRouter-v1.0.5-macOS.tar.gz) | 双击 `Install-Codex-Model-Router.command` |
+| Windows x64 / Arm64 | [Windows 安装包](https://github.com/Grails125/codex-model-router/releases/download/v1.1.0/CodexModelRouter-v1.1.0.zip) | 双击 `install-windows.cmd` |
+| macOS Apple Silicon / Intel | [macOS 安装包](https://github.com/Grails125/codex-model-router/releases/download/v1.1.0/CodexModelRouter-v1.1.0-macOS.tar.gz) | 双击 `Install-Codex-Model-Router.command` |
 
-[全部发布文件和 SHA-256 校验文件](https://github.com/Grails125/codex-model-router/releases/tag/v1.0.5)
+[全部发布文件和 SHA-256 校验文件](https://github.com/Grails125/codex-model-router/releases/tag/v1.1.0)
 
 必须先完整解压，再运行安装入口。安装包自带对应架构的程序，使用时不需要 Python、Node、WSL 或 Homebrew。
 
@@ -96,6 +96,8 @@ Codex 原生模型菜单
 
 将对话切回 OpenAI 时，路由会去掉其他模型的明文 reasoning 内容，保留可见消息及工具调用与结果。这项适配不代表不同模型的所有能力完全一致。
 
+当 Codex 自动触发上下文压缩时，路由会把 DeepSeek 或 OpenCode Go 返回的普通摘要转换为 Codex 需要的 compaction 项；后续请求再将其恢复为可读的摘要上下文。这样使用第三方模型时也会保留 Codex 的自动压缩流程，而不是在上下文达到上限后报压缩失败。
+
 安装器会备份 `~/.codex/config.toml`，并保留 MCP、插件、hooks 和信任设置等配置。安装器设置 `model_provider = "openai"`，通过带本地凭据的 `openai_base_url` 连接路由，并禁用路由尚未支持的请求压缩。卸载时恢复原设置。运行文件位于 `~/.codex/codex-model-router/`。
 
 Windows 使用当前用户的计划任务 `Codex Model Router`，macOS 使用当前用户的 LaunchAgent `io.openai.codex-model-router`，在登录后启动后台路由。
@@ -103,6 +105,18 @@ Windows 使用当前用户的计划任务 `Codex Model Router`，macOS 使用当
 从 1.0.3 起，Windows 安装目录中的 `codex-router.exe` 是无窗口程序，后台运行不显示命令行窗口。安装器从本项目的程序生成该版本，复用匹配的旧任务，无需修改原任务启动路径；同目录另存 `codex-router-cli.exe`，用于安装、诊断、修改密钥和前台调试。安装包内的程序仍为命令行版，供安装脚本使用。macOS 继续通过 LaunchAgent 静默运行。安装、诊断和输入 Key 时打开的终端可以在操作完成后关闭；后台启动输出写入 `service.log`。
 
 DeepSeek 密钥保存在本机 `deepseek.key` 中，不会打印到安装输出。路由审计日志记录时间、模型、渠道、HTTP 状态、流式标志和连接诊断字段，不记录原始异常文本、请求头、密钥或对话内容。Codex 客户端的诊断日志可能包含带本地凭据的路由 URL。分享日志前先脱敏，个人 `config.toml`、`auth.json`、`settings.json`、`deepseek.key` 和安装收据也应妥善保管。
+
+## 接入 OpenCode Go
+
+升级路由后，用开通 OpenCode Go 订阅的工作区 API Key 启用该渠道。先在当前终端安全地设置 `OPENCODE_API_KEY`，再运行下面的命令。也支持通过 `--stdin` 提供 Key。Windows 使用安装目录里的 `codex-router-cli.exe`。
+
+```text
+codex-router set-key --provider opencode-go
+```
+
+Key 保存为本机的 `opencode-go.key`。完全退出并重新打开 Codex 后，路由会通过 OpenCode Go 的模型列表接口拉取该工作区可用的聊天模型，并与现有模型合并。菜单中的 Go 模型带有 `(OpenCode Go)` 后缀。本地模型 ID 使用 `opencode-go/` 前缀，例如 `opencode-go/kimi-k3`。实际可用模型取决于工作区订阅和隐私设置。[OpenCode Go 模型列表 API](https://opencode.ai/docs/console/api/models/)
+
+选择 Go 模型时，路由使用 OpenCode Go 的 Responses 接口和该渠道的 Key，并保留 Codex 的会话标识。Go 模型目录暂时不可用时，菜单仍会返回 OpenAI 和 DeepSeek 模型。Codex 桌面的账号额度预检仍由客户端处理，额度面板显示 ChatGPT 的额度。[OpenCode Go 的 Codex 接入文档](https://opencode.ai/docs/console/harnesses/codex/)
 
 ## Codex 额度耗尽时继续用 DeepSeek
 
@@ -174,7 +188,7 @@ go build -trimpath -o codex-router .
 Windows 上构建全部四种架构及发布安装包：
 
 ```powershell
-powershell.exe -NoProfile -ExecutionPolicy Bypass -File .\build.ps1 -Version 1.0.5
+powershell.exe -NoProfile -ExecutionPolicy Bypass -File .\build.ps1 -Version 1.1.0
 ```
 
 完整打包还需要 Python，仅用于生成保留 macOS 执行权限的 tar.gz，不是安装后的运行依赖。输出位于 `dist/`，包括 ZIP、macOS tar.gz 和各自的 SHA-256 校验文件。`deepseek_models.json` 保存 DeepSeek 模型定义，`models.go` 将其嵌入程序；远程 OpenAI 模型目录由路由按客户端版本和账户身份获取。

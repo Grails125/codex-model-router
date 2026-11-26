@@ -21,7 +21,7 @@ import (
 )
 
 const (
-	Version      = "1.0.5"
+	Version      = "1.1.0"
 	defaultPort  = 49627
 	serviceLabel = "io.openai.codex-model-router"
 )
@@ -70,7 +70,7 @@ Commands:
   status     Check the router and report safe configuration state
   doctor     Validate runtime, credentials, config and service health
   deepseek   Start or resume Codex CLI with a DeepSeek model
-  set-key    Replace the DeepSeek key from --stdin or DEEPSEEK_API_KEY
+  set-key    Save a DeepSeek or OpenCode Go key for the router
   version    Print the binary version and platform
 
 Install options:
@@ -404,6 +404,9 @@ func commandServe(args []string) error {
 	}, audit.Write)
 	if err != nil {
 		return err
+	}
+	router.OpenCodeGoKey = func() (string, error) {
+		return readProviderKey(*dataDir, "opencode-go.key")
 	}
 	server := &http.Server{
 		Addr: fmt.Sprintf("127.0.0.1:%d", options.Port), Handler: router,

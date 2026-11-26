@@ -21,12 +21,13 @@ import (
 const maxBodyBytes = 64 << 20
 
 type RuntimeOptions struct {
-	Port        int    `json:"port"`
-	RouterKey   string `json:"router_key"`
-	OpenAIURL   string `json:"openai_url,omitempty"`
-	DeepSeekURL string `json:"deepseek_url,omitempty"`
-	CatalogURL  string `json:"catalog_url,omitempty"`
-	Version     string `json:"version,omitempty"`
+	Port          int    `json:"port"`
+	RouterKey     string `json:"router_key"`
+	OpenAIURL     string `json:"openai_url,omitempty"`
+	DeepSeekURL   string `json:"deepseek_url,omitempty"`
+	OpenCodeGoURL string `json:"opencode_go_url,omitempty"`
+	CatalogURL    string `json:"catalog_url,omitempty"`
+	Version       string `json:"version,omitempty"`
 }
 
 type AuditRecord struct {
@@ -39,12 +40,13 @@ type AuditRecord struct {
 }
 
 type Router struct {
-	Options     RuntimeOptions
-	Registry    *modelRegistry
-	DeepSeek    []map[string]any
-	DeepSeekKey func() (string, error)
-	Audit       func(AuditRecord)
-	Client      *http.Client
+	Options       RuntimeOptions
+	Registry      *modelRegistry
+	DeepSeek      []map[string]any
+	DeepSeekKey   func() (string, error)
+	OpenCodeGoKey func() (string, error)
+	Audit         func(AuditRecord)
+	Client        *http.Client
 }
 
 var hopHeaders = map[string]bool{
@@ -59,6 +61,9 @@ func normalizedRuntime(options RuntimeOptions) RuntimeOptions {
 	}
 	if options.DeepSeekURL == "" {
 		options.DeepSeekURL = "https://api.deepseek.com"
+	}
+	if options.OpenCodeGoURL == "" {
+		options.OpenCodeGoURL = "https://opencode.ai/inference/go"
 	}
 	if options.CatalogURL == "" {
 		options.CatalogURL = strings.TrimRight(options.OpenAIURL, "/") + "/models"
@@ -250,14 +255,15 @@ func (router *Router) models(w http.ResponseWriter, r *http.Request) {
 		seen[slug] = true
 		normalizedOpenAI = append(normalizedOpenAI, model)
 	}
-	combined := make([]any, 0, len(models)+len(router.DeepSeek))
-	for _, value := range models {
-		combined = append(combined, value)
-	}
-	for _, model := range router.DeepSeek {
-		slug, _ := model["slug"].(string)
-		if slug != "" && !seen[slug] {
-			combined = append(combined, model)
+	goModels := router.openCodeGoModels(r.Context())
+	combined := append(make([]any, 0, len(models)+len(goModels)+len(router.DeepSeek)), models...)
+	for _, group := range [][]map[string]any{goModels, router.DeepSeek} {
+		for _, model := range group {
+			slug, _ := model["slug"].(string)
+			if slug != "" && !seen[slug] {
+				seen[slug] = true
+				combined = append(combined, model)
+			}
 		}
 	}
 	upstream["models"] = combined
@@ -282,8 +288,11 @@ func (router *Router) responses(w http.ResponseWriter, r *http.Request) {
 		writeError(w, http.StatusBadRequest, "Responses request requires a model")
 		return
 	}
+	goModel, isOpenCodeGo := strings.CutPrefix(model, openCodeGoPrefix)
 	provider := ""
-	if router.Registry.isDeepSeek(model) {
+	if isOpenCodeGo && openCodeGoModelID.MatchString(goModel) {
+		provider = openCodeGoProvider
+	} else if router.Registry.isDeepSeek(model) {
 		provider = "deepseek"
 	} else if router.Registry.isOpenAI(model) {
 		provider = "openai"
@@ -291,13 +300,44 @@ func (router *Router) responses(w http.ResponseWriter, r *http.Request) {
 		writeError(w, http.StatusBadRequest, "Select a model from the authenticated catalog")
 		return
 	}
-	if provider == "deepseek" && strings.HasSuffix(r.URL.Path, "/compact") {
+	compactionTurn := compactionRequested(r, payload)
+	expandRouterCompaction(payload)
+	compact := strings.HasSuffix(r.URL.Path, "/compact")
+	if provider == "deepseek" && compact {
 		writeError(w, http.StatusBadRequest, "DeepSeek uses local conversation compaction")
+		return
+	}
+	if provider == openCodeGoProvider && compact {
+		writeError(w, http.StatusBadRequest, "OpenCode Go does not support the Codex remote compaction endpoint")
 		return
 	}
 	upstreamURL := router.Options.OpenAIURL
 	headers := make(http.Header)
-	if provider == "deepseek" {
+	switch provider {
+	case openCodeGoProvider:
+		if router.OpenCodeGoKey == nil {
+			writeError(w, http.StatusServiceUnavailable, "OpenCode Go credential unavailable")
+			return
+		}
+		key, err := router.OpenCodeGoKey()
+		if err != nil || key == "" {
+			writeError(w, http.StatusServiceUnavailable, "OpenCode Go credential unavailable")
+			return
+		}
+		upstreamURL = strings.TrimRight(router.Options.OpenCodeGoURL, "/") + "/openai/v1"
+		headers.Set("Authorization", "Bearer "+key)
+		headers.Set("Content-Type", "application/json")
+		headers.Set("Accept", "text/event-stream")
+		headers.Set("User-Agent", "codex-model-router/"+router.Options.Version)
+		setOpenCodeGoSession(headers, r.Header, payload)
+		payload["model"] = goModel
+		delete(payload, "service_tier")
+		body, err = json.Marshal(payload)
+		if err != nil {
+			writeError(w, http.StatusBadRequest, "Invalid Responses request")
+			return
+		}
+	case "deepseek":
 		upstreamURL = router.Options.DeepSeekURL
 		key, err := router.DeepSeekKey()
 		if err != nil || key == "" {
@@ -307,7 +347,12 @@ func (router *Router) responses(w http.ResponseWriter, r *http.Request) {
 		headers.Set("Authorization", "Bearer "+key)
 		headers.Set("Content-Type", "application/json")
 		headers.Set("Accept", "text/event-stream")
-	} else {
+		body, err = json.Marshal(payload)
+		if err != nil {
+			writeError(w, http.StatusBadRequest, "Invalid Responses request")
+			return
+		}
+	default:
 		copyOpenAIHeaders(headers, r.Header)
 		if !strings.HasPrefix(headers.Get("Authorization"), "Bearer ") {
 			writeError(w, http.StatusUnauthorized, "ChatGPT authentication is required")
@@ -322,7 +367,7 @@ func (router *Router) responses(w http.ResponseWriter, r *http.Request) {
 	}
 	headers.Set("Accept-Encoding", "identity")
 	suffix := "/responses"
-	if strings.HasSuffix(r.URL.Path, "/compact") {
+	if compact {
 		suffix = "/responses/compact"
 	}
 	upstreamURL = strings.TrimRight(upstreamURL, "/") + suffix
@@ -344,6 +389,44 @@ func (router *Router) responses(w http.ResponseWriter, r *http.Request) {
 		return
 	}
 	defer response.Body.Close()
+	if compactionTurn && provider != "openai" && response.StatusCode >= 200 && response.StatusCode < 300 {
+		raw, readErr := io.ReadAll(io.LimitReader(response.Body, maxCompactionBodyBytes+1))
+		if readErr != nil || len(raw) > maxCompactionBodyBytes {
+			writeError(w, http.StatusBadGateway, "Invalid third-party compaction response")
+			diagnostic.Stage = "response_body"
+			diagnostic.ErrorClass = "compaction_response_invalid"
+			diagnostic.ElapsedMS = time.Since(started).Milliseconds()
+			router.audit(model, provider, http.StatusBadGateway, payload, diagnostic)
+			return
+		}
+		transformed, transformErr := adaptThirdPartyCompaction(raw)
+		if transformErr != nil {
+			writeError(w, http.StatusBadGateway, "Third-party compaction response was not usable: "+transformErr.Error())
+			diagnostic.Stage = "compaction"
+			diagnostic.ErrorClass = "compaction_response_invalid"
+			diagnostic.ElapsedMS = time.Since(started).Milliseconds()
+			router.audit(model, provider, http.StatusBadGateway, payload, diagnostic)
+			return
+		}
+		for _, key := range []string{"Content-Type", "Retry-After", "X-Request-ID", "Content-Encoding"} {
+			if value := response.Header.Get(key); value != "" {
+				w.Header().Set(key, value)
+			}
+		}
+		w.Header().Set("Cache-Control", "no-store")
+		w.Header().Set("X-Content-Type-Options", "nosniff")
+		w.WriteHeader(response.StatusCode)
+		if _, writeErr := w.Write(transformed); writeErr != nil {
+			diagnostic.Stage, diagnostic.ErrorClass = "client_write", "client_disconnected"
+			diagnostic.ElapsedMS = time.Since(started).Milliseconds()
+			router.audit(model, provider, 499, payload, diagnostic)
+			return
+		}
+		diagnostic.Stage = "completed"
+		diagnostic.ElapsedMS = time.Since(started).Milliseconds()
+		router.audit(model, provider, response.StatusCode, payload, diagnostic)
+		return
+	}
 	for _, key := range []string{"Content-Type", "Retry-After", "X-Request-ID", "Content-Encoding"} {
 		if value := response.Header.Get(key); value != "" {
 			w.Header().Set(key, value)

@@ -51,6 +51,23 @@ func TestSetKeyChangesOnlyCredentialWithoutEcho(t *testing.T) {
 	}
 }
 
+func TestSetOpenCodeGoKeyPreservesDeepSeekKey(t *testing.T) {
+	home, dataDir := keyTestInstallation(t)
+	t.Setenv("DEEPSEEK_API_KEY", "unused-deepseek-env-key")
+	t.Setenv("OPENCODE_API_KEY", "open-code-fixture-key")
+	var output bytes.Buffer
+	if err := setKey([]string{"--codex-home", home, "--provider", "opencode-go"}, strings.NewReader(""), &output); err != nil {
+		t.Fatal(err)
+	}
+	if got := string(mustRead(t, filepath.Join(dataDir, "opencode-go.key"))); got != "open-code-fixture-key" {
+		t.Fatal("OpenCode Go credential was not saved")
+	}
+	if string(mustRead(t, filepath.Join(dataDir, "deepseek.key"))) != "test-old-key" ||
+		strings.Contains(output.String(), "open-code-fixture-key") {
+		t.Fatal("setting the OpenCode Go key changed or exposed another credential")
+	}
+}
+
 func TestSetKeyRejectsInvalidInputAndPreservesCredential(t *testing.T) {
 	for name, input := range map[string]string{
 		"empty": "\r\n", "space": "key with space", "multiline": "key\nsecond-key",

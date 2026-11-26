@@ -1,3 +1,12 @@
+# v1.1.0
+
+- 新增 OpenCode Go 渠道。设置该渠道 Key 后，路由会把工作区可用的聊天模型合并到 Codex 原生模型菜单，并为 Go 请求单独使用工作区凭据和会话标识。
+- 新增 `set-key --provider opencode-go`，复用现有安装目录并在不修改 DeepSeek 凭据的情况下保存 OpenCode Go Key。
+- 修复 DeepSeek 和 OpenCode Go 在上下文达到上限时无法完成 Codex 自动压缩的问题。路由会把第三方模型返回的普通摘要转换为 Codex 需要的 compaction 项，并在后续请求中恢复为摘要上下文。
+- 新增自动压缩协议、OpenCode Go 会话、模型目录和凭据隔离回归测试。
+
+重新下载并完整解压安装包，运行安装入口即可升级。升级完成后完全退出并重新打开 Codex。
+
 # v1.0.5
 
 - 新增 `codex-router deepseek`，支持在 Codex CLI 中用 DeepSeek 新建对话，或通过 `--resume SESSION_ID` 继续原有会话。Windows 使用 `codex-router-cli.exe`。
